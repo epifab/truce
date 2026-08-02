@@ -79,12 +79,11 @@ where
     // file into a stereo-main plugin would route sidechain L as the main
     // right channel). Prefer a layout whose main width already matches the
     // file so the common case never remixes; fall back to the first
-    // declared layout otherwise. `channels` also drives the sidechain
-    // offset and the output width.
+    // declared layout otherwise.
     let layouts = P::bus_layouts();
-    let (channels, sidechain_width) = resolve_render_layout(&layouts, file_channels)
-        .ok_or("effect plugin declares no bus layout; cannot offline-render")?;
-    if channels == 0 {
+    let layout = resolve_render_layout(&layouts, file_channels)
+        .ok_or("plugin declares no bus layout; cannot offline-render")?;
+    if layout.main_input_channels == 0 {
         return Err("plugin's main input bus has no channels; cannot offline-render".into());
     }
     let block_size = opts.buffer_size.map_or(DEFAULT_BLOCK_SIZE, |b| b as usize);
@@ -94,25 +93,25 @@ where
         input_path.display(),
         output_path.display(),
         sample_rate,
-        channels,
+        layout.main_input_channels,
         block_size,
     );
 
-    let input_buf = decode_wav_channel_major(input_path, sample_rate, channels)?;
+    let input_buf = decode_wav_channel_major(input_path, sample_rate, layout.main_input_channels)?;
     let total_frames = input_buf.first().map_or(0, std::vec::Vec::len);
     let duration = Duration::from_secs_f64(frame_count_f64(total_frames) / sample_rate);
 
     let sidechain_buf = match opts.sidechain_file.as_deref() {
-        Some(path) if sidechain_width > 0 => {
+        Some(path) if layout.sidechain_channels > 0 => {
             eprintln!(
                 "Offline sidechain: {} → sidechain bus ({} ch)",
                 path.display(),
-                sidechain_width,
+                layout.sidechain_channels,
             );
             Some(decode_wav_channel_major(
                 path,
                 sample_rate,
-                sidechain_width,
+                layout.sidechain_channels,
             )?)
         }
         Some(path) => {
@@ -129,10 +128,10 @@ where
 
     let mut driver = PluginDriver::<P>::new()
         .sample_rate(sample_rate)
-        .channels(channels)
+        .channels(layout.main_input_channels)
         // Pin the sidechain width to the layout we selected, so the
         // driver's flat input matches even when that isn't layout 0.
-        .sidechain_channels(sidechain_width)
+        .sidechain_channels(layout.sidechain_channels)
         .block_size(block_size)
         .duration(duration)
         .process_mode(ProcessMode::Offline)
@@ -194,19 +193,27 @@ fn sidechain_bus_width(layout: &BusLayout) -> usize {
         .sum()
 }
 
-/// Pick the layout to render in and return `(main_width, sidechain_width)`.
+struct RenderLayout {
+    main_input_channels: usize,
+    sidechain_channels: usize,
+}
+
+/// Pick the layout to render in and return its main / sidechain widths.
 /// Prefers a declared layout whose main width already equals the file's,
 /// so the common case never up/down-mixes; falls back to the first
 /// declared layout otherwise. The file is then adapted to `main_width`, so
 /// the sidechain (appended after the main channels) always lands at the
 /// right flat offset regardless of the file's own width. `None` only when
 /// the plugin declares no layout at all.
-fn resolve_render_layout(layouts: &[BusLayout], file_channels: usize) -> Option<(usize, usize)> {
+fn resolve_render_layout(layouts: &[BusLayout], file_channels: usize) -> Option<RenderLayout> {
     let layout = layouts
         .iter()
         .find(|l| main_bus_width(l) == file_channels)
         .or_else(|| layouts.first())?;
-    Some((main_bus_width(layout), sidechain_bus_width(layout)))
+    Some(RenderLayout {
+        main_input_channels: main_bus_width(layout),
+        sidechain_channels: sidechain_bus_width(layout),
+    })
 }
 
 /// Minimal WAV spec read - open, grab `(sample_rate, channels)`,
