@@ -137,6 +137,7 @@ where
         .duration(duration)
         .process_mode(ProcessMode::Offline)
         .bpm(opts.bpm.unwrap_or(120.0))
+        .playing(true)
         .input(InputSource::Buffer(input_buf));
 
     if let Some(sc) = sidechain_buf {

@@ -49,7 +49,7 @@ use truce_core::buffer::RawBufferScratch;
 use truce_core::bus::BusLayout;
 #[cfg(feature = "wav")]
 use truce_core::cast::sample_rate_u32;
-use truce_core::cast::{len_u32, sample_count_usize};
+use truce_core::cast::{len_u32, sample_count_usize, sample_pos_i64};
 use truce_core::chunked_process::{ChunkedProcess, process_chunked};
 use truce_core::config::{AudioConfig, ProcessMode};
 use truce_core::events::{EVENT_LIST_PREALLOC, Event, EventBody, EventList, TransportInfo};
@@ -1015,16 +1015,8 @@ impl<P: PluginExport> PluginDriver<P> {
             };
 
             // Transport snapshot for this block.
-            let transport_info = TransportInfo {
-                playing: self.transport.playing,
-                tempo: self.transport.bpm,
-                time_sig_num: self.transport.time_signature.0,
-                time_sig_den: self.transport.time_signature.1,
-                position_seconds: cursor as f64 / self.sample_rate,
-                position_beats: transport_pos_beats,
-                bar_start_beats: 0.0,
-                ..Default::default()
-            };
+            let transport_info =
+                transport_info_for_block(&self.transport, transport_pos_beats, self.sample_rate);
             output_events_block.clear();
 
             let mut transport_snap = transport_info;
@@ -1244,9 +1236,32 @@ fn fill_input_block(
     }
 }
 
+fn transport_info_for_block(
+    transport: &TransportSpec,
+    position_beats: f64,
+    sample_rate: f64,
+) -> TransportInfo {
+    let position_seconds = if transport.bpm > 0.0 {
+        position_beats * 60.0 / transport.bpm
+    } else {
+        0.0
+    };
+    TransportInfo {
+        playing: transport.playing,
+        tempo: transport.bpm,
+        time_sig_num: transport.time_signature.0,
+        time_sig_den: transport.time_signature.1,
+        position_samples: sample_pos_i64(position_seconds * sample_rate),
+        position_seconds,
+        position_beats,
+        bar_start_beats: 0.0,
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::default_sidechain_channels;
+    use super::{TransportSpec, default_sidechain_channels, transport_info_for_block};
     use truce_core::bus::{BusLayout, ChannelConfig};
 
     /// A multi-layout plugin driven at a non-default main width must take
@@ -1279,5 +1294,37 @@ mod tests {
     fn no_sidechain_bus_is_zero() {
         let layouts = [BusLayout::stereo()];
         assert_eq!(default_sidechain_channels(&layouts, 2), 0);
+    }
+
+    #[test]
+    fn transport_info_reports_beat_seconds_and_sample_position() {
+        let transport = TransportSpec {
+            bpm: 120.0,
+            playing: true,
+            position_beats: 0.0,
+            time_signature: (3, 4),
+        };
+        let info = transport_info_for_block(&transport, 2.0, 48_000.0);
+        assert!(info.playing);
+        assert_eq!(info.tempo, 120.0);
+        assert_eq!(info.time_sig_num, 3);
+        assert_eq!(info.time_sig_den, 4);
+        assert_eq!(info.position_beats, 2.0);
+        assert_eq!(info.position_seconds, 1.0);
+        assert_eq!(info.position_samples, 48_000);
+    }
+
+    #[test]
+    fn transport_info_zero_tempo_has_no_derived_timeline() {
+        let transport = TransportSpec {
+            bpm: 0.0,
+            playing: true,
+            position_beats: 0.0,
+            time_signature: (4, 4),
+        };
+        let info = transport_info_for_block(&transport, 2.0, 48_000.0);
+        assert_eq!(info.position_beats, 2.0);
+        assert_eq!(info.position_seconds, 0.0);
+        assert_eq!(info.position_samples, 0);
     }
 }
