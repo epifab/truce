@@ -70,11 +70,59 @@ fn open_at(open_scale: f32) -> std::rc::Rc<MinimalSoftwareWindow> {
 fn render(window: &MinimalSoftwareWindow, phys_w: u32, phys_h: u32) {
     let mut px_buf: Vec<PremultipliedRgbaColor> = Vec::new();
     let mut rgba_buf: Vec<u8> = Vec::new();
+    let mut rendered_size = None;
     // The live handler forces a redraw each frame before rendering.
     window.request_redraw();
-    platform::render_to_rgba(window, phys_w, phys_h, &mut px_buf, &mut rgba_buf);
+    platform::render_to_rgba(
+        window,
+        phys_w,
+        phys_h,
+        &mut px_buf,
+        &mut rgba_buf,
+        &mut rendered_size,
+    );
     // Sanity: the un-premultiplied buffer is sized to the physical extent.
     assert_eq!(rgba_buf.len(), (phys_w * phys_h * 4) as usize);
+}
+
+/// A new or resized pixel buffer has no valid previous frame. Even if the
+/// Slint scene itself is unchanged, every pixel must be repainted.
+#[test]
+fn replaced_pixel_buffer_gets_a_full_redraw() {
+    let window = open_at(1.0);
+    let mut px_buf = Vec::new();
+    let mut rgba_buf = Vec::new();
+    let mut rendered_size = None;
+    platform::render_to_rgba(
+        &window,
+        LW,
+        LH,
+        &mut px_buf,
+        &mut rgba_buf,
+        &mut rendered_size,
+    );
+    assert!(
+        rgba_buf
+            .chunks_exact(4)
+            .all(|pixel| pixel == [255, 0, 0, 255])
+    );
+
+    // Simulate a buffer invalidated during a resize with the same pixel count.
+    px_buf.fill(PremultipliedRgbaColor::default());
+    rendered_size = None;
+    platform::render_to_rgba(
+        &window,
+        LW,
+        LH,
+        &mut px_buf,
+        &mut rgba_buf,
+        &mut rendered_size,
+    );
+    assert!(
+        rgba_buf
+            .chunks_exact(4)
+            .all(|pixel| pixel == [255, 0, 0, 255])
+    );
 }
 
 /// The OLD `Resized` handler: dispatch `ScaleFactorChanged` eagerly (grows the

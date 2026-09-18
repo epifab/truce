@@ -70,6 +70,7 @@ struct Inner<P: Params + ?Sized> {
     px_buf: Vec<PremultipliedRgbaColor>,
     /// Un-premultiplied RGBA8 bytes ready for `CGImage`.
     rgba_buf: Vec<u8>,
+    rendered_size: Option<(u32, u32)>,
     sync: SyncFn<P>,
     context: PluginContext<P>,
     last_pointer: LogicalPosition,
@@ -226,6 +227,7 @@ impl<P: Params + 'static> Editor for SlintEditor<P> {
             slint_window,
             px_buf: Vec::with_capacity((phys_w * phys_h) as usize),
             rgba_buf: Vec::with_capacity((phys_w * phys_h * 4) as usize),
+            rendered_size: None,
             sync,
             context: typed_ctx,
             last_pointer: LogicalPosition::new(-1.0, -1.0),
@@ -563,6 +565,7 @@ fn run_frame<P: Params + 'static>(inner: &mut Inner<P>) {
         phys_h,
         &mut inner.px_buf,
         &mut inner.rgba_buf,
+        &mut inner.rendered_size,
     );
 
     unsafe {

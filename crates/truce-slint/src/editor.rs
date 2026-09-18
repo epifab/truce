@@ -337,6 +337,7 @@ struct SlintWindowHandler<P: Params + ?Sized> {
     gpu: Option<SlintWgpu>,
     px_buf: Vec<PremultipliedRgbaColor>,
     rgba_buf: Vec<u8>,
+    rendered_size: Option<(u32, u32)>,
     width: u32,
     height: u32,
     /// Shared with the parent `SlintEditor`; `set_scale_factor` (host)
@@ -703,6 +704,7 @@ impl<P: Params + ?Sized + 'static> WindowHandler for SlintWindowHandler<P> {
             phys_h,
             &mut self.px_buf,
             &mut self.rgba_buf,
+            &mut self.rendered_size,
         );
 
         // 5. Blit to screen
@@ -1124,6 +1126,7 @@ impl<P: Params + 'static> Editor for SlintEditor<P> {
                     gpu: None,
                     px_buf: Vec::new(),
                     rgba_buf: Vec::new(),
+                    rendered_size: None,
                     width: lw,
                     height: lh,
                     scale: scale_handle,

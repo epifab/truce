@@ -169,12 +169,27 @@ pub fn render_to_rgba(
     height: u32,
     px_buf: &mut Vec<PremultipliedRgbaColor>,
     rgba_buf: &mut Vec<u8>,
+    rendered_size: &mut Option<(u32, u32)>,
 ) {
     let pixel_count = (width * height) as usize;
     px_buf.resize(pixel_count, PremultipliedRgbaColor::default());
 
+    // ReusedBuffer retains pixels that Slint does not mark dirty. A resize
+    // changes their row stride, even when the new size has the same area, so
+    // the old contents cannot be reused for the first frame at this size.
+    let size_changed = *rendered_size != Some((width, height));
+    if size_changed {
+        window.request_redraw();
+    }
     window.draw_if_needed(|renderer| {
+        if size_changed {
+            renderer.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+        }
         renderer.render(px_buf, width as usize);
+        if size_changed {
+            renderer.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
+        }
+        *rendered_size = Some((width, height));
     });
 
     // Un-premultiply Slint's premultiplied output before uploading.
