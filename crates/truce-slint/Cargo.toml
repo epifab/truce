@@ -52,6 +52,7 @@ raw-window-handle = "0.5"
 bytemuck = { version = "1", features = ["derive"] }
 paste = "1"
 log = "0.4"
+copypasta = "0.10"
 
 # baseview + wgpu + the macOS-only objc helper aren't viable in an
 # iOS App Extension sandbox; baseview doesn't ship an iOS port and
