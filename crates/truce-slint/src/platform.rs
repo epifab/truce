@@ -10,7 +10,7 @@ use std::rc::Rc;
 use slint::platform::software_renderer::{
     MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType,
 };
-use slint::platform::{Platform, PlatformError};
+use slint::platform::{Clipboard, Platform, PlatformError};
 
 // Baseview parent-window bridge + wgpu surface constructor are
 // desktop-only (iOS doesn't have baseview and creates its own
@@ -40,6 +40,27 @@ impl Platform for TrucePlatform {
         // Return the pre-created window if one was set, otherwise create a new one.
         let window = NEXT_WINDOW.with(|slot| slot.borrow_mut().take());
         Ok(window.unwrap_or_else(|| MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer)))
+    }
+
+    fn set_clipboard_text(&self, text: &str, clipboard: Clipboard) {
+        if !matches!(clipboard, Clipboard::DefaultClipboard) {
+            return;
+        }
+
+        use copypasta::ClipboardProvider;
+        if let Ok(mut context) = copypasta::ClipboardContext::new() {
+            let _ = context.set_contents(text.to_owned());
+        }
+    }
+
+    fn clipboard_text(&self, clipboard: Clipboard) -> Option<String> {
+        if !matches!(clipboard, Clipboard::DefaultClipboard) {
+            return None;
+        }
+
+        use copypasta::ClipboardProvider;
+        let mut context = copypasta::ClipboardContext::new().ok()?;
+        context.get_contents().ok()
     }
 }
 
