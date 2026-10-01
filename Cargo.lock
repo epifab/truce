@@ -299,6 +299,7 @@ dependencies = [
  "plist",
  "png 0.18.1",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tinytemplate",
  "toml",
@@ -3835,6 +3836,7 @@ dependencies = [
  "truce-core",
  "truce-params",
  "truce-shim-types",
+ "truce-utils",
 ]
 
 [[package]]

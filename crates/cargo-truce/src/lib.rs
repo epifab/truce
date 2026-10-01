@@ -5,6 +5,7 @@
 //! `--workspace` modes, which live in the [`scaffold`] module).
 //! Every other subcommand goes through [`run`].
 
+mod bundle_plist;
 mod commands;
 mod config;
 pub(crate) mod dirs;
@@ -75,6 +76,9 @@ pub(crate) use util::tmp_lv2;
 // `read_workspace_version` is consumed by all three packagers
 // (macOS / Windows / Linux tarball), so it stays unconditional.
 pub(crate) use util::read_workspace_version;
+// `plugin_version` feeds the macOS bundle `Info.plist` writers.
+#[cfg(target_os = "macos")]
+pub(crate) use util::plugin_version;
 
 // `release_lib_for_target` resolves a per-triple build output path; it
 // powers macOS universal lipo, Windows x64+arm64, and Linux dual-arch

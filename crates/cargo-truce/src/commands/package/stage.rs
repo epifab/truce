@@ -342,28 +342,7 @@ fn stage_vst3_macos(root: &Path, p: &PluginDef, config: &Config, bundle: &Path) 
     let exec_name = p.file_stem();
     fs::copy(&dylib, macos_dir.join(&exec_name))?;
 
-    let plist = format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>{exec_name}</string>
-    <key>CFBundleIdentifier</key>
-    <string>{vendor_id}.{bundle_id}</string>
-    <key>CFBundleName</key>
-    <string>{display_name}</string>
-    <key>CFBundlePackageType</key>
-    <string>BNDL</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-</dict>
-</plist>"#,
-        display_name = xml_escape(&p.name),
-        bundle_id = p.bundle_id,
-        vendor_id = xml_escape(&config.vendor.id),
-        exec_name = xml_escape(&exec_name),
-    );
+    let plist = crate::bundle_plist::vst3_info_plist(p, config, &crate::plugin_version(root, p));
     fs::write(bundle.join("Contents/Info.plist"), &plist)?;
     codesign_bundle(
         bundle.to_str().unwrap(),
@@ -524,58 +503,7 @@ pub(crate) fn stage_au2(root: &Path, p: &PluginDef, config: &Config, staging: &P
     let exec_name = p.file_stem();
     fs::copy(&dylib, macos_dir.join(&exec_name))?;
 
-    let plist = format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>{exec_name}</string>
-    <key>CFBundleIdentifier</key>
-    <string>{vendor_id}.{bundle_id}.component</string>
-    <key>CFBundleName</key>
-    <string>{display_name}</string>
-    <key>CFBundlePackageType</key>
-    <string>BNDL</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>AudioComponents</key>
-    <array>
-        <dict>
-            <key>type</key>
-            <string>{au_type}</string>
-            <key>subtype</key>
-            <string>{au_subtype}</string>
-            <key>manufacturer</key>
-            <string>{au_mfr}</string>
-            <key>name</key>
-            <string>{vendor}: {display_name}</string>
-            <key>description</key>
-            <string>{display_name}</string>
-            <key>version</key>
-            <integer>65536</integer>
-            <key>factoryFunction</key>
-            <string>TruceAUFactory</string>
-            <key>sandboxSafe</key>
-            <true/>
-            <key>tags</key>
-            <array>
-                <string>{au_tag}</string>
-            </array>
-        </dict>
-    </array>
-</dict>
-</plist>"#,
-        display_name = xml_escape(&p.name),
-        bundle_id = p.bundle_id,
-        vendor_id = xml_escape(&config.vendor.id),
-        vendor = xml_escape(&config.vendor.name),
-        au_type = xml_escape(p.resolved_au_type()),
-        au_subtype = xml_escape(p.resolved_fourcc()),
-        au_mfr = xml_escape(&config.vendor.au_manufacturer),
-        au_tag = xml_escape(&p.au_tag),
-        exec_name = xml_escape(&exec_name),
-    );
+    let plist = crate::bundle_plist::au2_info_plist(p, config, &crate::plugin_version(root, p));
     fs::write(bundle.join("Contents/Info.plist"), &plist)?;
     // The shim's kAudioUnitProperty_FactoryPresets handler enumerates
     // these from the sealed bundle - emit before codesign.

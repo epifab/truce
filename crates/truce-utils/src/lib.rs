@@ -27,6 +27,9 @@
 //!   display names used as path components (`{name}.aaxplugin`,
 //!   `{name}.vst3`, etc.). Replaces filesystem-reserved characters
 //!   without lowercasing or collapsing words.
+//! - [`au_version_u32`] - `"major.minor.patch"` → AU component version
+//!   packing, shared by the AU runtime (`truce-au`) and the AU v2
+//!   `Info.plist` writers in `cargo-truce` so the two always agree.
 //!
 //! `truce-core` re-exports the modules above so consumers that pull
 //! `truce-core` don't need a second dependency. Crates that want to
@@ -99,6 +102,46 @@ pub fn safe_filename(name: &str) -> String {
     }
     out.trim_matches(|c: char| c.is_whitespace() || c == '.' || c == '-')
         .to_string()
+}
+
+/// Pack a `"major.minor.patch"` version string into the AU component
+/// version `u32`: `(major << 16) | (minor << 8) | patch`. Hosts (Logic,
+/// `GarageBand`) key their AU validation cache and component registry on
+/// this value, so a shipped update must change it or the host keeps stale
+/// cached validation and metadata. Falls back to `0x0001_0000` (1.0.0)
+/// when a component isn't a plain number (empty string, pre-release
+/// suffix on that component).
+///
+/// Used both for the value the AU reports at runtime and for the
+/// `AudioComponents` `version` in the bundle's `Info.plist`; auval and
+/// hosts expect the two to match.
+#[must_use]
+pub fn au_version_u32(version: &str) -> u32 {
+    let mut parts = version.split('.').map(|p| p.trim().parse::<u32>().ok());
+    let major = parts.next().flatten().unwrap_or(1);
+    let minor = parts.next().flatten().unwrap_or(0);
+    let patch = parts.next().flatten().unwrap_or(0);
+    ((major & 0xFFFF) << 16) | ((minor & 0xFF) << 8) | (patch & 0xFF)
+}
+
+#[cfg(test)]
+mod au_version_tests {
+    use super::au_version_u32;
+
+    /// The plugin's declared version packs into the AU component version
+    /// `(major << 16) | (minor << 8) | patch`, so a shipped update changes
+    /// the value hosts key their AU caches on.
+    #[test]
+    fn au_version_packs_semver() {
+        assert_eq!(au_version_u32("1.0.0"), 0x0001_0000);
+        assert_eq!(au_version_u32("1.2.3"), 0x0001_0203);
+        assert_eq!(au_version_u32("2.10.5"), 0x0002_0A05);
+        assert_eq!(au_version_u32("0.38.0"), 0x0000_2600);
+        assert_eq!(au_version_u32("26.9.1"), 0x001A_0901);
+        // Unparseable components fall back per position (major -> 1).
+        assert_eq!(au_version_u32(""), 0x0001_0000);
+        assert_eq!(au_version_u32("1.2.3-beta"), 0x0001_0200);
+    }
 }
 
 #[cfg(test)]
