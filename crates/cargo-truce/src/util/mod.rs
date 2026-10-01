@@ -538,6 +538,38 @@ pub(crate) fn read_workspace_version(root: &Path) -> Result<String, crate::Cargo
     .into())
 }
 
+/// The version a plugin's binary reports to hosts, resolved the same way
+/// `truce::plugin_info!()` resolves it at compile time: the `[[plugin]]
+/// version` override in `truce.toml`, else the plugin crate's own
+/// `[package] version` (following `version.workspace = true`).
+///
+/// Bundle `Info.plist` writers stamp this into `CFBundleVersion` and the
+/// AU `AudioComponents` version, so the plist and the binary agree.
+/// Falls back to the workspace version, then `0.0.0` with a warning,
+/// when the plugin crate's manifest can't be read.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn plugin_version(root: &Path, p: &crate::PluginDef) -> String {
+    if let Some(v) = p.version.as_deref().filter(|v| !v.is_empty()) {
+        return v.to_string();
+    }
+    let crate_version = locate_plugin_manifest(root, &p.crate_name)
+        .and_then(|manifest| fs::read_to_string(manifest).ok())
+        .and_then(|content| content.parse::<toml::Table>().ok())
+        .and_then(|doc| doc.get("package")?.get("version").cloned());
+    // `version.workspace = true` (a table, not a string) falls through:
+    // the workspace version is what cargo resolves it to.
+    if let Some(toml::Value::String(v)) = crate_version {
+        return v;
+    }
+    read_workspace_version(root).unwrap_or_else(|e| {
+        eprintln!(
+            "WARNING: {e}; defaulting {} bundle version to 0.0.0",
+            p.crate_name
+        );
+        "0.0.0".to_string()
+    })
+}
+
 /// Resolve a plugin crate's `Cargo.toml` path via `cargo metadata`.
 /// Used by `detect_default_features` to find the manifest in
 /// workspace layouts where plugins live in arbitrary subdirectories.
@@ -555,26 +587,32 @@ pub(crate) fn locate_plugin_manifest(project_root: &Path, crate_name: &str) -> O
     if !out.status.success() {
         return None;
     }
-    // Cheap substring parse - avoids depending on serde_json here. We
-    // only need `"name":"crate_name"` and the package's `"manifest_path"`.
-    //
-    // `cargo metadata` emits each package as
-    // `{"name":..., "version":..., ..., "manifest_path":..., ...}` -
-    // `manifest_path` is always *after* `name` within the same object,
-    // and only appears at the package level (not in `dependencies` /
-    // `targets`). So scanning forward from the matched `name` lands on
-    // the right package's path. The earlier symmetric window scan
-    // could see the *previous* package's `manifest_path` (which sits
-    // right before the next `name` field) and silently return it.
-    let text = String::from_utf8_lossy(&out.stdout);
-    let name_needle = format!("\"name\":\"{crate_name}\"");
-    let idx = text.find(&name_needle)?;
-    let after = &text[idx + name_needle.len()..];
-    let mp_marker = "\"manifest_path\":\"";
-    let mp_idx = after.find(mp_marker)?;
-    let rest = &after[mp_idx + mp_marker.len()..];
-    let end = rest.find('"')?;
-    Some(PathBuf::from(&rest[..end]))
+    manifest_path_from_metadata(&String::from_utf8_lossy(&out.stdout), crate_name)
+}
+
+/// Pick `crate_name`'s manifest out of `cargo metadata` JSON.
+///
+/// Matches package entries only. A substring search for
+/// `"name":"<crate>"` also hits *dependency* entries, so in a workspace
+/// where another member depends on the plugin crate (tools, tests) it
+/// returned that member's manifest instead.
+fn manifest_path_from_metadata(json: &str, crate_name: &str) -> Option<PathBuf> {
+    #[derive(serde::Deserialize)]
+    struct Metadata {
+        packages: Vec<Package>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Package {
+        name: String,
+        manifest_path: PathBuf,
+    }
+
+    serde_json::from_str::<Metadata>(json)
+        .ok()?
+        .packages
+        .into_iter()
+        .find(|p| p.name == crate_name)
+        .map(|p| p.manifest_path)
 }
 
 /// Resolve the Cargo *workspace* root for a manifest via `cargo
@@ -1193,6 +1231,40 @@ pub(crate) fn check_cmd(cmd: &str, args: &[&OsStr], label: &str) {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicU64;
+
+    /// A workspace member that depends on the plugin crate lists it in
+    /// its `dependencies` before its own `manifest_path`; only the
+    /// plugin's own package entry may match.
+    #[test]
+    fn manifest_lookup_ignores_dependency_entries() {
+        let json = r#"{
+            "packages": [
+                {
+                    "name": "plugin-tool",
+                    "version": "0.1.0",
+                    "dependencies": [{ "name": "my-plugin", "req": "*", "path": "/ws" }],
+                    "manifest_path": "/ws/tools/plugin-tool/Cargo.toml"
+                },
+                {
+                    "name": "my-plugin",
+                    "version": "26.9.1",
+                    "dependencies": [],
+                    "manifest_path": "/ws/Cargo.toml"
+                }
+            ],
+            "workspace_members": []
+        }"#;
+        assert_eq!(
+            manifest_path_from_metadata(json, "my-plugin"),
+            Some(PathBuf::from("/ws/Cargo.toml"))
+        );
+        assert_eq!(
+            manifest_path_from_metadata(json, "plugin-tool"),
+            Some(PathBuf::from("/ws/tools/plugin-tool/Cargo.toml"))
+        );
+        assert_eq!(manifest_path_from_metadata(json, "missing"), None);
+        assert_eq!(manifest_path_from_metadata("not json", "my-plugin"), None);
+    }
 
     #[test]
     fn extra_features_split_on_comma_and_space() {
